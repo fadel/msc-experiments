@@ -9,140 +9,151 @@ automated.m <- function(D, labels) {
   for (label in unique(labels)) {
     same.label <- labels == label
     D.m[same.label, same.label] <- D[same.label, same.label] * 0.1
-    #D.m[same.label, diff.label] <- D[same.label, diff.label] * 10
-    #D.m[diff.label, same.label] <- D.m[same.label, diff.label]
   }
 
   D.m
 }
 
-xy.df <- function(M) {
-  M <- as.data.frame(M)
-  names(M) <- c("x", "y")
-
-  M
-}
-
 test <- function(file, suffix, output.dir) {
-  cat("Testing dataset ", file, "...\n")
+  message("Testing dataset ", file)
   dataset <- read.table(file)
 
   # Extract labels
-  labels  <- dataset[, ncol(dataset)]
-
-  # Remove labels from dataset
+  labels <- dataset[, ncol(dataset)]
+  classes <- as.factor(labels)
   X <- dataset[, -ncol(dataset)]
-  
+
   n <- nrow(X)
 
   # Calculate distances (X) and normalize
+  message("\tCalculating dist(X)")
   Dx <- dist(X)
   Dx <- Dx / mean(Dx)
   Dx <- as.matrix(Dx)
 
+  # Sample dataset
   sample.indices <- sample(n, 3*sqrt(n))
+  classes.s <- as.factor(labels[sample.indices])
+
+  # Automatic sample positioning
+  message("\tCalculating Ys")
   Dx.s <- Dx[sample.indices, sample.indices]
   Ys   <- forceScheme(Dx.s)
-  Ys   <- xy.df(Ys)
-  Y    <- lamp(X, sample.indices, Ys)
-  Y    <- xy.df(Y)
 
-  # Plot mapping
-  classes <- as.factor(labels)
-  classes.s <- as.factor(labels[sample.indices])
-  p.s <- ggplot(cbind(Ys, classes.s), aes(x = x, y = y, colour = classes.s)) + geom_point()
-  p   <- ggplot(cbind(Y, classes), aes(x = x, y = y, colour = classes)) + geom_point()
-  pdf(paste(output.dir, "original-", suffix, ".pdf", sep=""), width = 10, height = 5)
-  grid.arrange(p.s, p,
-               widths = unit(rep_len(3, 2), "null"),
-               heights = unit(rep_len(1, 2), "null"),
-               ncol=2)
-  dev.off()
-  png(paste(output.dir, "original-", suffix, ".png", sep=""), width = 1200, height = 600)
-  grid.arrange(p.s, p,
-               widths = unit(rep_len(3, 2), "null"),
-               heights = unit(rep_len(1, 2), "null"),
-               ncol=2)
-  dev.off()
+  # LAMP
+  message("\tCalculating Y")
+  Y <- lamp(X, sample.indices, Ys)
 
   # Calculate distances (Y) and normalize
+  message("\tCalculating dist(Y)")
   Dy <- dist(Y)
   Dy <- Dy / mean(Dy)
   Dy <- as.matrix(Dy)
 
-  # Calculate measures and plot
+  message("\tCalculating P and Q")
   sigmas <- vector("numeric", n)
   sigmas[] <- 1
   P <- d2p(Dx, sigmas)
   Q <- d2p(Dy, sigmas)
-  np = NP(Dx, Dy)
-  #stress = stress(Dx, Dy),
+
+  # Calculate measures
+  message("\tCalculating measures")
+  np <- NP(Dx, Dy)
   precision <- klDivergence(Q, P)
   recall <- klDivergence(P, Q)
-  p.np        <- ggplot(cbind(Y, np), aes(x = x, y = y, colour = np)) + geom_point() + labs(title = "NP (9)")
-  p.precision <- ggplot(cbind(Y, precision), aes(x = x, y = y, colour = precision)) + geom_point() + labs(title = "Precision")
-  p.recall    <- ggplot(cbind(Y, recall), aes(x = x, y = y, colour = recall)) + geom_point()    + labs(title = "Recall")
-  pdf(paste(output.dir, "measures-original-", suffix, ".pdf", sep=""), width = 15, height = 5)
-  grid.arrange(p.np, p.precision, p.recall,
-               widths = unit(rep_len(3, 3), "null"),
-               heights = unit(rep_len(1, 3), "null"),
-               ncol=3)
-  dev.off()
-  png(paste(output.dir, "measures-original-", suffix, ".png", sep=""), width = 1800, height = 600)
-  grid.arrange(p.np, p.precision, p.recall,
-               widths = unit(rep_len(3, 3), "null"),
-               heights = unit(rep_len(1, 3), "null"),
-               ncol=3)
+
+  # Plot results
+  #color_scale <- scale_colour_gradientn(colours = c("#e46c0a", "#dddddd", "#376092"))
+  color_scale <- scale_colour_gradient2(mid = "#dddddd", space = "Lab")
+  shape_scale <- scale_shape(solid = FALSE)
+  Ys <- cbind(as.data.frame(Ys), classes.s)
+  Y  <- cbind(as.data.frame(Y), classes, np, precision, recall)
+  p.s <- ggplot(Ys) +
+      theme_bw() +
+      labs(x = "", y = "") +
+      geom_point(aes(x = V1, y = V2, shape = classes.s, colour = classes.s)) +
+      shape_scale
+  p <- ggplot(Y) +
+      theme_bw() +
+      labs(x = "", y = "") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = classes)) +
+      shape_scale
+  p.np <- ggplot(Y) +
+      theme_bw() +
+      labs(x = "", y = "", title = "NP (9)") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = np)) +
+      shape_scale + color_scale
+  p.precision <- ggplot(Y) +
+      theme_bw() +
+      labs(x = "", y = "", title = "Precision") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = precision)) +
+      shape_scale + color_scale
+  p.recall <- ggplot(Y) +
+      theme_bw() +
+      labs(x = "", y = "", title = "Recall") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = recall)) +
+      shape_scale + color_scale
+  
+  pdf(paste(output.dir, "original-", suffix, ".pdf", sep=""), width = 16, height = 8)
+  grid.arrange(p.s, p, p.np, p.precision, p.recall, ncol=3)
   dev.off()
 
   # Perform manipulation
+  message("\tCalculating Ys.m")
   Dx.m <- automated.m(Dx.s, labels[sample.indices])
   Ys.m <- forceScheme(Dx.m)
-  Ys.m <- xy.df(Ys.m)
-  Y.m  <- lamp(X, sample.indices, Ys.m)
-  Y.m  <- xy.df(Y.m)
 
-  # Plot mapping
-  p.s <- ggplot(cbind(Ys.m, classes.s), aes(x = x, y = y, colour = classes.s)) + geom_point()
-  p   <- ggplot(cbind(Y.m, classes), aes(x = x, y = y, colour = classes)) + geom_point()
-  pdf(paste(output.dir, "manip-", suffix, ".pdf", sep=""), width = 10, height = 5)
-  grid.arrange(p.s, p,
-               widths = unit(rep_len(3, 2), "null"),
-               heights = unit(rep_len(1, 2), "null"),
-               ncol=2)
-  dev.off()
-  png(paste(output.dir, "manip-", suffix, ".png", sep=""), width = 1200, height = 600)
-  grid.arrange(p.s, p,
-               widths = unit(rep_len(3, 2), "null"),
-               heights = unit(rep_len(1, 2), "null"),
-               ncol=2)
-  dev.off()
+  # LAMP
+  message("\tCalculating Y.m")
+  Y.m <- lamp(X, sample.indices, Ys.m)
 
   # Calculate distances (Y.m) and normalize
+  message("\tCalculating dist(Y.m)")
   Dy <- dist(Y.m)
   Dy <- Dy / mean(Dy)
   Dy <- as.matrix(Dy)
-  Q <- d2p(Dy, sigmas)
 
-  # Calculate measures and plot
-  np = np - NP(Dx, Dy)
-  #stress = stress(Dx, Dy),
+  message("\tCalculating Q")
+  Q  <- d2p(Dy, sigmas)
+
+  # Calculate measures
+  message("\tCalculating measures")
+  np <- np - NP(Dx, Dy)
   precision <- precision - klDivergence(Q, P)
   recall <- recall - klDivergence(P, Q)
-  p.np        <- ggplot(cbind(Y.m, np), aes(x = x, y = y, colour = np)) + geom_point() + labs(title = "NP (9)")
-  p.precision <- ggplot(cbind(Y.m, precision), aes(x = x, y = y, colour = precision)) + geom_point() + labs(title = "Precision")
-  p.recall    <- ggplot(cbind(Y.m, recall), aes(x = x, y = y, colour = recall)) + geom_point()    + labs(title = "Recall")
-  pdf(paste(output.dir, "measures-manip-", suffix, ".pdf", sep=""), width = 15, height = 5)
-  grid.arrange(p.np, p.precision, p.recall,
-               widths = unit(rep_len(3, 3), "null"),
-               heights = unit(rep_len(1, 3), "null"),
-               ncol=3)
-  dev.off()
-  png(paste(output.dir, "measures-manip-", suffix, ".png", sep=""), width = 1800, height = 600)
-  grid.arrange(p.np, p.precision, p.recall,
-               widths = unit(rep_len(3, 3), "null"),
-               heights = unit(rep_len(1, 3), "null"),
-               ncol=3)
+
+  # Plot results
+  Ys.m <- cbind(as.data.frame(Ys.m), classes.s)
+  Y.m  <- cbind(as.data.frame(Y.m), classes, np, precision, recall)
+  p.s <- ggplot(cbind(Ys.m, classes.s)) +
+      theme_bw() +
+      labs(x = "", y = "") +
+      geom_point(aes(x = V1, y = V2, shape = classes.s, colour = classes.s)) +
+      scale_shape_identity() +
+      shape_scale
+  p <- ggplot(cbind(Y.m, classes)) +
+      theme_bw() +
+      labs(x = "", y = "") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = classes)) +
+      shape_scale
+  p.np <- ggplot(cbind(Y.m, np)) +
+      theme_bw() +
+      labs(x = "", y = "", title = "NP (9)") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = np)) +
+      shape_scale + color_scale
+  p.precision <- ggplot(cbind(Y.m, precision)) +
+      theme_bw() +
+      labs(x = "", y = "", title = "Precision") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = precision)) +
+      shape_scale + color_scale
+  p.recall <- ggplot(cbind(Y.m, recall)) +
+      theme_bw() +
+      labs(x = "", y = "", title = "Recall") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = recall)) +
+      shape_scale + color_scale
+  
+  pdf(paste(output.dir, "manip-", suffix, ".pdf", sep=""), width = 16, height = 8)
+  grid.arrange(p.s, p, p.np, p.precision, p.recall, ncol=3)
   dev.off()
 }
 
