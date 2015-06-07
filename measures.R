@@ -53,24 +53,98 @@ NP <- function(Dx, Dy, k = 9) {
   preservation
 }
 
-d2p <- function(D, sigmas) {
+silhouette <- function(Dy, labels) {
+  if (any(t(Dy) != Dy)) {
+    stop("Dy must be symmetric")
+  }
+
+  Dy <- as.matrix(Dy)
+  n <- nrow(Dy)
+  cohesion <- vector("numeric", n)
+  separation <- vector("numeric", n)
+
+  for (i in 1:n) {
+    label <- labels[i]
+    cohesion[i] <- mean(Dy[i, labels[-i] == label])
+    separation[i] <- min(Dy[i, labels != label])
+  }
+
+  silh <- (cohesion - separation) / max(cohesion, separation)
+}
+
+d2p <- function(D, perplexity = 9, tol = 1e-5, max.tries = 50) {
+  if (any(D != t(D))) {
+    stop("D must be symmetric")
+  }
+
+  D <- as.matrix(D)
+  P <- matrix(data=0, nrow=nrow(D), ncol=ncol(D))
+  n <- nrow(D)
+  beta <- rep(1, n)
+  logU <- log(perplexity)
+
+  for (i in 1:n) {
+    #denom <- sum(exp(-D[i, ] / sigmas))
+    #P[i, ] <- exp(-D[i, ] / sigmas) / denom
+
+    betaMin <- -Inf
+    betaMax <-  Inf
+    Di <- D[i, -i]
+
+    tries <- 0
+    repeat {
+      Pi <- exp(-Di * beta[i])
+      sumPi <- sum(Pi)
+      H <- log(sumPi) + beta[i] * sum(Di * Pi) / sumPi
+      Pi <- Pi / sumPi
+      Hdiff <- H - logU
+
+      if (abs(Hdiff) < tol || tries > max.tries) {
+        break
+      }
+
+      if (Hdiff > 0) {
+        betaMin <- beta[i]
+        beta[i] <- if (is.finite(betaMax)) {
+                     (beta[i] + betaMax) / 2
+                   } else {
+                     beta[i] * 2
+                   }
+      } else {
+        betaMax <- beta[i]
+        beta[i] <- if (is.finite(betaMin)) {
+                     (beta[i] + betaMin) / 2
+                   } else {
+                     beta[i] / 2
+                   }
+      }
+
+      tries <- tries + 1
+    }
+
+    P[i, -i] <- Pi
+  }
+
+  list(P = P, beta = beta) # sigmas = sqrt(1 / beta)
+}
+
+d2p.beta <- function(D, beta) {
   if (any(D != t(D))) {
     stop("D must be symmetric")
   }
 
   D <- as.matrix(D)
   n <- nrow(D)
-  P <- matrix(data=NA, nrow=nrow(D), ncol=ncol(D))
-
+  P <- matrix(data=0, nrow=nrow(D), ncol=ncol(D))
   for (i in 1:n) {
-    denom <- sum(exp(-D[i, ] / sigmas))
-    P[i, ] <- exp(-D[i, ] / sigmas) / denom
+    P[i, -i] <- exp(-D[i, -i] * beta[i])
+    P[i, -i] <- P[i, -i] / sum(P[i, -i])
   }
 
   P
 }
 
-klDivergence <- function(P, Q) {
+klDivergence <- function(P, Q, eps = 1e-12) {
   if (nrow(P) != ncol(P) || nrow(Q) != ncol(Q)) {
     stop("P and Q must be square")
   }
@@ -78,10 +152,12 @@ klDivergence <- function(P, Q) {
     stop("P and Q must have the same number of elements")
   }
 
+  P[P < eps] <- eps
+  Q[Q < eps] <- eps
   n <- nrow(P)
   d <- vector("numeric", n)
   for (i in 1:n) {
-    d[i] <- sum(P[i, ] * log(P[i, ] / Q[i, ]))
+    d[i] <- sum(P[i, -i] * log(P[i, -i] / Q[i, -i]))
   }
 
   d

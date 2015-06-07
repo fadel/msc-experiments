@@ -15,7 +15,7 @@ automated.m <- function(D, labels) {
 }
 
 test <- function(file, suffix, output.dir) {
-  message("Testing dataset ", file)
+  message("Testing dataset: ", file)
   dataset <- read.table(file)
 
   # Extract labels
@@ -51,23 +51,30 @@ test <- function(file, suffix, output.dir) {
   Dy <- as.matrix(Dy)
 
   message("\tCalculating P and Q")
-  sigmas <- vector("numeric", n)
-  sigmas[] <- 1
-  P <- d2p(Dx, sigmas)
-  Q <- d2p(Dy, sigmas)
+  prob <- d2p(Dx^2)
+  P <- prob$P
+  Q <- d2p.beta(Dy^2, prob$beta)
 
   # Calculate measures
   message("\tCalculating measures")
   np <- NP(Dx, Dy)
+  silh <- silhouette(Dy, classes)
   precision <- klDivergence(Q, P)
   recall <- klDivergence(P, Q)
 
+  if (!(all(is.finite(np)) &&
+      all(is.finite(silh)) &&
+      all(is.finite(precision)) &&
+      all(is.finite(recall)))) {
+    stop("Non-finite measures found")
+  }
+
   # Plot results
-  #color_scale <- scale_colour_gradientn(colours = c("#e46c0a", "#dddddd", "#376092"))
-  color_scale <- scale_colour_gradient2(mid = "#dddddd", space = "Lab")
-  shape_scale <- scale_shape(solid = FALSE)
+  message("\tPlotting results")
+  color_scale <- scale_colour_gradient(high = "#376092", low = "#e46c0a", space = "Lab")
+  shape_scale <- scale_shape_manual(values = 1:nlevels(classes))
   Ys <- cbind(as.data.frame(Ys), classes.s)
-  Y  <- cbind(as.data.frame(Y), classes, np, precision, recall)
+  Y  <- cbind(as.data.frame(Y), classes, np, silh, precision, recall)
   p.s <- ggplot(Ys) +
       theme_bw() +
       labs(x = "", y = "") +
@@ -83,6 +90,11 @@ test <- function(file, suffix, output.dir) {
       labs(x = "", y = "", title = "NP (9)") +
       geom_point(aes(x = V1, y = V2, shape = classes, colour = np)) +
       shape_scale + color_scale
+  p.silh <- ggplot(Y) +
+      theme_bw() +
+      labs(x = "", y = "", title = "Silhouette") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = silh)) +
+      shape_scale + color_scale
   p.precision <- ggplot(Y) +
       theme_bw() +
       labs(x = "", y = "", title = "Precision") +
@@ -94,14 +106,14 @@ test <- function(file, suffix, output.dir) {
       geom_point(aes(x = V1, y = V2, shape = classes, colour = recall)) +
       shape_scale + color_scale
   
-  pdf(paste(output.dir, "original-", suffix, ".pdf", sep=""), width = 16, height = 8)
-  grid.arrange(p.s, p, p.np, p.precision, p.recall, ncol=3)
+  pdf(paste(output.dir, "original-", suffix, ".pdf", sep=""), width = 12, height = 16)
+  grid.arrange(p.s, p, p.np, p.silh, p.precision, p.recall, ncol = 2)
   dev.off()
 
   # Perform manipulation
   message("\tCalculating Ys.m")
   Dx.m <- automated.m(Dx.s, labels[sample.indices])
-  Ys.m <- forceScheme(Dx.m)
+  Ys.m <- forceScheme(Dx.m, Ys[, 1:2])
 
   # LAMP
   message("\tCalculating Y.m")
@@ -114,46 +126,60 @@ test <- function(file, suffix, output.dir) {
   Dy <- as.matrix(Dy)
 
   message("\tCalculating Q")
-  Q  <- d2p(Dy, sigmas)
+  Q <- d2p.beta(Dy^2, prob$beta)
 
   # Calculate measures
   message("\tCalculating measures")
-  np <- np - NP(Dx, Dy)
-  precision <- precision - klDivergence(Q, P)
-  recall <- recall - klDivergence(P, Q)
+  np <- NP(Dx, Dy) - np
+  silh <- silhouette(Dy, classes) - silh
+  precision <- klDivergence(Q, P) - precision
+  recall <- klDivergence(P, Q) - recall
+
+  if (!(all(is.finite(np)) &&
+      all(is.finite(silh)) &&
+      all(is.finite(precision)) &&
+      all(is.finite(recall)))) {
+    stop("Non-finite measures found")
+  }
 
   # Plot results
+  message("\tPlotting results")
+  color_scale <- scale_colour_gradient2(mid = "#dddddd", space = "Lab")
   Ys.m <- cbind(as.data.frame(Ys.m), classes.s)
-  Y.m  <- cbind(as.data.frame(Y.m), classes, np, precision, recall)
-  p.s <- ggplot(cbind(Ys.m, classes.s)) +
+  Y.m  <- cbind(as.data.frame(Y.m), classes, np, silh, precision, recall)
+  p.s <- ggplot(Ys.m) +
       theme_bw() +
       labs(x = "", y = "") +
       geom_point(aes(x = V1, y = V2, shape = classes.s, colour = classes.s)) +
-      scale_shape_identity() +
       shape_scale
-  p <- ggplot(cbind(Y.m, classes)) +
+  p <- ggplot(Y.m) +
       theme_bw() +
       labs(x = "", y = "") +
       geom_point(aes(x = V1, y = V2, shape = classes, colour = classes)) +
       shape_scale
-  p.np <- ggplot(cbind(Y.m, np)) +
+  p.np <- ggplot(Y.m) +
       theme_bw() +
       labs(x = "", y = "", title = "NP (9)") +
       geom_point(aes(x = V1, y = V2, shape = classes, colour = np)) +
       shape_scale + color_scale
-  p.precision <- ggplot(cbind(Y.m, precision)) +
+  p.silh <- ggplot(Y.m) +
+      theme_bw() +
+      labs(x = "", y = "", title = "Silhouette") +
+      geom_point(aes(x = V1, y = V2, shape = classes, colour = silh)) +
+      shape_scale + color_scale
+  p.precision <- ggplot(Y.m) +
       theme_bw() +
       labs(x = "", y = "", title = "Precision") +
       geom_point(aes(x = V1, y = V2, shape = classes, colour = precision)) +
       shape_scale + color_scale
-  p.recall <- ggplot(cbind(Y.m, recall)) +
+  p.recall <- ggplot(Y.m) +
       theme_bw() +
       labs(x = "", y = "", title = "Recall") +
       geom_point(aes(x = V1, y = V2, shape = classes, colour = recall)) +
       shape_scale + color_scale
   
-  pdf(paste(output.dir, "manip-", suffix, ".pdf", sep=""), width = 16, height = 8)
-  grid.arrange(p.s, p, p.np, p.precision, p.recall, ncol=3)
+  pdf(paste(output.dir, "manip-", suffix, ".pdf", sep=""), width = 12, height = 16)
+  grid.arrange(p.s, p, p.np, p.silh, p.precision, p.recall, ncol = 2)
   dev.off()
 }
 
