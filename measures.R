@@ -65,11 +65,11 @@ silhouette <- function(Dy, labels) {
 
   for (i in 1:n) {
     label <- labels[i]
-    cohesion[i] <- mean(Dy[i, labels[-i] == label])
     separation[i] <- min(Dy[i, labels != label])
+    cohesion[i] <- mean(Dy[i, labels[-i] == label])
   }
 
-  silh <- (cohesion - separation) / max(cohesion, separation)
+  silh <- (separation - cohesion) / max(separation, cohesion)
 }
 
 d2p <- function(D, perplexity = 9, tol = 1e-5, max.tries = 50) {
