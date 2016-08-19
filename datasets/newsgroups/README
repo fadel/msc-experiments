@@ -1,0 +1,7 @@
+For running the script newsgroups_extract.py we used N = 500 and topics are
+'comp.graphics', 'misc.forsale', and 'sci.med'.
+
+The randomly generated ids in our case are in the file 'newsgroups-500-3.ids'.
+
+Before running the script, be sure to generate the stopwords file using
+'stop.sh'.
