@@ -1,19 +1,16 @@
-require(ggplot2)
-require(gridExtra)
+# Main experiments script: performs sampling, manipulation and projections for
+# all techniques, datasets and measures.
+
+require(logging)
+require(MASS)
 require(mp)
+require(Rtsne)
 
 source("measures.R")
 
-#automated.m <- function(D, labels) {
-#  D.m <- D
-#  for (label in unique(labels)) {
-#    same.label <- labels == label
-#    D.m[same.label, same.label] <- D[same.label, same.label] * 0.1
-#  }
-#
-#  D.m
-#}
-automated.m <- function(Xs, labels) {
+# Performs automated silhouette improvement manipulation, using a method
+# inspired by Schaefer et al. (2013).
+automated.silh <- function(Xs, labels) {
   n <- nrow(Xs)
   p <- ncol(Xs)
   Xs <- cbind(Xs, matrix(data=0, nrow=n, ncol=p))
@@ -23,228 +20,307 @@ automated.m <- function(Xs, labels) {
     }
   }
 
-  dist(Xs)
+  Dx <- dist(Xs)
+  # Dx <- Dx / mean(Dx)
+  as.matrix(Dx)
 }
 
-color_scale.blue_orange <- function(name) {
-  scale_colour_gradient(name = name, high = "#376092", low = "#e46c0a", space = "Lab")
+# NOTE: This function requires the 'klmeasure' binary from:
+# http://research.cs.aalto.fi/pml/software/dredviz/
+nerv <- function(Dx, Y, lambda=0.1) {
+  # Create SOM_PAK file for Dx
+  Dx.fname <- tempfile()
+  Dx.f <- file(Dx.fname, "w")
+  cat(sprintf("%d\n", ncol(Dx)), file=Dx.f)
+  write.table(Dx, Dx.f, col.names=F, row.names=F)
+  close(Dx.f)
+
+  # Create SOM_PAK file for Y
+  Y.fname <- tempfile()
+  Y.f <- file(Y.fname, "w")
+  cat(sprintf("%d\n", ncol(Y)), file=Y.f)
+  write.table(Y, Y.f, col.names=F, row.names=F)
+  close(Y.f)
+
+  # Run NeRV
+  Ym.fname <- tempfile()
+  system2("./nerv",
+          stdout=F,
+          stderr=F,
+          args=c("--inputdist", Dx.fname,
+                 "--outputfile", Ym.fname,
+                 "--init", Y.fname,
+                 "--lambda", sprintf("%.2f", lambda)))
+
+  # Read results from generated file; remove file afterwards
+  Ym <- read.table(Ym.fname, skip=1)
+  file.remove(Dx.fname, Y.fname, Ym.fname)
+
+  Ym
 }
 
-color_scale.gradient2 <- function(name) {
-  scale_colour_gradient2(name = name, mid = "#dddddd", space = "Lab")
+# Wrapper so that we can 'do.call' pekalska as we do with other techniques
+pekalska.wrapper <- function(X, sample.indices, Ys) {
+  pekalska(dist(X), sample.indices, Ys)
 }
 
-test <- function(file, suffix, output.dir) {
-  message("Testing dataset: ", file)
-  dataset <- read.table(file)
+# Scales columns of projections so that all values are in [0, 1]
+scale.Ys <- function(Ys) {
+  for (j in 1:ncol(Ys)) {
+    min.j <- min(Ys[, j])
+    max.j <- max(Ys[, j])
+    Ys[, j] <- (Ys[, j] - min.j) / (max.j - min.j)
+  }
 
-  # Extract labels
-  labels <- dataset[, ncol(dataset)]
-  classes <- as.factor(labels)
-  X <- dataset[, -ncol(dataset)]
+  Ys
+}
 
+dir.create.safe <- function(path, log=T) {
+  if (!dir.exists(path)) {
+    if (log) {
+      loginfo("Creating directory: %s", path)
+    }
+
+    dir.create(path)
+  }
+}
+
+run.manipulation <- function(X, Dx, labels, k, ds, n.iter, output.dir) {
   n <- nrow(X)
 
-  # Calculate distances (X) and normalize
-  message("\tCalculating dist(X)")
-  Dx <- dist(X)
-  Dx <- Dx / mean(Dx)
-  Dx <- as.matrix(Dx)
+  loginfo("Calculating all sample.indices and Ys")
+  for (iter in 1:n.iter) {
+    loginfo("Iteration: %02d", iter)
+    # Sample dataset
+    sample.indices <- sample(n, max(ncol(X), sqrt(n)*3))
+    fname <- paste("sample-indices-", iter, ".tbl", sep="")
+    write.table(sample.indices, file.path(output.dir, ds$name, fname), row.names=F, col.names=F)
 
-  # Sample dataset
-  sample.indices <- sample(n, 3*sqrt(n))
-  classes.s <- as.factor(labels[sample.indices])
+    # Initial sample positioning
+    loginfo("Calculating Ys")
+    Dx.s  <- Dx[sample.indices, sample.indices]
+    Ys    <- scale.Ys(cmdscale(Dx.s))
+    fname <- paste("Ys-", iter, ".tbl", sep="")
+    write.table(Ys, file.path(output.dir, ds$name, fname), row.names=F, col.names=F)
 
-  # Automatic sample positioning
-  message("\tCalculating Ys")
-  Dx.s <- Dx[sample.indices, sample.indices]
-  Ys   <- forceScheme(Dx.s)
+    # Perform manipulation
+    loginfo("Running manipulation procedures")
 
-  # LAMP
-  message("\tCalculating Y")
-  Y <- lamp(X, sample.indices, Ys)
+    loginfo("Ys.m: Silhouette")
+    Dx.m <- automated.silh(X[sample.indices, ], labels[sample.indices])
+    Ys.silhouette <- scale.Ys(cmdscale(Dx.m))
+    Ys.m <- Ys.silhouette
+    fname <- paste("Ysm-silhouette-", iter, ".tbl", sep="")
+    write.table(Ys.m, file.path(output.dir, ds$name, fname), row.names=F, col.names=F)
 
-  # Calculate distances (Y) and normalize
-  message("\tCalculating dist(Y)")
-  Dy <- dist(Y)
-  Dy <- Dy / mean(Dy)
-  Dy <- as.matrix(Dy)
+    loginfo("Ys.m: NP")
+    Ys.np <- scale.Ys(Rtsne(X[sample.indices, ], perplexity=k)$Y)
+    Ys.m <- Ys.np
+    fname <- paste("Ysm-np-", iter, ".tbl", sep="")
+    write.table(Ys.m, file.path(output.dir, ds$name, fname), row.names=F, col.names=F)
 
-  message("\tCalculating P and Q")
-  prob <- d2p(Dx^2)
-  P <- prob$P
-  Q <- d2p.beta(Dy^2, prob$beta)
+    loginfo("Ys.m: Stress")
+    Ys.stress <- scale.Ys(sammon(Dx.s, Ys, tol=1e-20)$points)
+    Ys.m <- Ys.stress
+    fname <- paste("Ysm-stress-", iter, ".tbl", sep="")
+    write.table(Ys.m, file.path(output.dir, ds$name, fname), row.names=F, col.names=F)
 
-  # Calculate measures
-  message("\tCalculating measures")
-  np <- NP(Dx, Dy)
-  silh <- silhouette(Dy, classes)
-  precision <- klDivergence(Q, P)
-  recall <- klDivergence(P, Q)
+    loginfo("Ys.m: Precision")
+    Ys.precision <- scale.Ys(nerv(Dx.s, Ys, 0.01))
+    Ys.m <- Ys.precision
+    fname <- paste("Ysm-precision-", iter, ".tbl", sep="")
+    write.table(Ys.m, file.path(output.dir, ds$name, fname), row.names=F, col.names=F)
 
-  measures <- rbind(data.frame(mean=mean(np), median=median(np), sd=sd(np)),
-                    data.frame(mean=mean(silh), median=median(silh), sd=sd(silh)),
-                    data.frame(mean=mean(precision), median=median(precision), sd=sd(precision)),
-                    data.frame(mean=mean(recall), median=median(recall), sd=sd(recall)))
-  write.table(measures, paste(output.dir, suffix, "-measures.csv", sep=""), row.names=F)
-
-  if (!(all(is.finite(np)) &&
-      all(is.finite(silh)) &&
-      all(is.finite(precision)) &&
-      all(is.finite(recall)))) {
-    stop("Non-finite measures found")
+    loginfo("Ys.m: Recall")
+    Ys.recall <- scale.Ys(nerv(Dx.s, Ys, 0.99))
+    Ys.m <- Ys.recall
+    fname <- paste("Ysm-recall-", iter, ".tbl", sep="")
+    write.table(Ys.m, file.path(output.dir, ds$name, fname), row.names=F, col.names=F)
   }
-
-  # Plot results
-  message("\tPlotting results")
-  shape_scale <- scale_shape_manual(name = "Classe", values = 1:nlevels(classes))
-  Ys <- cbind(as.data.frame(Ys), classes.s)
-  Y  <- cbind(as.data.frame(Y), classes, np, silh, precision, recall)
-  p.s <- ggplot(Ys) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes.s, colour = classes.s)) +
-      shape_scale + scale_color_manual(name = "Classe", values = 1:nlevels(classes))
-  ggsave(paste(output.dir, "subsample-", suffix, ".pdf", sep=""), p.s, width=5, height=5)
-
-  p <- ggplot(Y) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = classes)) +
-      shape_scale + scale_color_manual(name = "Classe", values = 1:nlevels(classes))
-  ggsave(paste(output.dir, suffix, ".pdf", sep=""), p, width=5, height=5)
-
-  p.np <- ggplot(Y) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = np)) +
-      shape_scale + color_scale.blue_orange("NP")
-  ggsave(paste(output.dir, "np-", suffix, ".pdf", sep=""), p.np, width=5, height=5)
-
-  p.silh <- ggplot(Y) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = silh)) +
-      shape_scale + color_scale.blue_orange("Silhueta")
-  ggsave(paste(output.dir, "silh-", suffix, ".pdf", sep=""), p.silh, width=5, height=5)
-
-  p.precision <- ggplot(Y) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = precision)) +
-      shape_scale + color_scale.blue_orange("Precisão")
-  ggsave(paste(output.dir, "precision-", suffix, ".pdf", sep=""), p.precision, width=5, height=5)
-
-  p.recall <- ggplot(Y) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = recall)) +
-      shape_scale + color_scale.blue_orange("Revocação")
-  ggsave(paste(output.dir, "recall-", suffix, ".pdf", sep=""), p.recall, width=5, height=5)
-
-  
-  pdf(paste(output.dir, "all-", suffix, ".pdf", sep=""), width = 12, height = 16)
-  grid.arrange(p.s, p, p.np, p.silh, p.precision, p.recall, ncol = 2)
-  dev.off()
-
-  # Perform manipulation
-  message("\tCalculating Ys.m")
-  Dx.m <- automated.m(X[sample.indices, ], labels[sample.indices])
-  Ys.m <- forceScheme(Dx.m, Ys[, 1:2])
-
-  # LAMP
-  message("\tCalculating Y.m")
-  Y.m <- lamp(X, sample.indices, Ys.m)
-
-  # Calculate distances (Y.m) and normalize
-  message("\tCalculating dist(Y.m)")
-  Dy <- dist(Y.m)
-  Dy <- Dy / mean(Dy)
-  Dy <- as.matrix(Dy)
-
-  message("\tCalculating Q")
-  Q <- d2p.beta(Dy^2, prob$beta)
-
-  # Calculate measures
-  message("\tCalculating measures")
-  np <- NP(Dx, Dy) - np
-  silh <- silhouette(Dy, classes) - silh
-  precision <- klDivergence(Q, P) - precision
-  recall <- klDivergence(P, Q) - recall
-
-  measures <- rbind(data.frame(mean=mean(np), median=median(np), sd=sd(np)),
-                    data.frame(mean=mean(silh), median=median(silh), sd=sd(silh)),
-                    data.frame(mean=mean(precision), median=median(precision), sd=sd(precision)),
-                    data.frame(mean=mean(recall), median=median(recall), sd=sd(recall)))
-  write.table(measures, paste(output.dir, suffix, "-manip-measures.csv", sep=""), row.names=F)
-
-  if (!(all(is.finite(np)) &&
-      all(is.finite(silh)) &&
-      all(is.finite(precision)) &&
-      all(is.finite(recall)))) {
-    stop("Non-finite measures found")
-  }
-
-  # Plot results
-  message("\tPlotting results")
-  Ys.m <- cbind(as.data.frame(Ys.m), classes.s)
-  Y.m  <- cbind(as.data.frame(Y.m), classes, np, silh, precision, recall)
-  pm.s <- ggplot(Ys.m) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes.s, colour = classes.s)) +
-      shape_scale + scale_color_manual(name = "Classe", values = 1:nlevels(classes))
-  ggsave(paste(output.dir, "manip-subsample-", suffix, ".pdf", sep=""), pm.s, width=5, height=5)
-
-  pm <- ggplot(Y.m) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = classes)) +
-      shape_scale + scale_color_manual(name = "Classe", values = 1:nlevels(classes))
-  ggsave(paste(output.dir, "manip-", suffix, ".pdf", sep=""), pm, width=5, height=5)
-
-  p.np <- ggplot(Y.m) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = np)) +
-      shape_scale + color_scale.gradient2("NP")
-  ggsave(paste(output.dir, "manip-np-", suffix, ".pdf", sep=""), p.np, width=5, height=5)
-
-  p.silh <- ggplot(Y.m) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = silh)) +
-      shape_scale + color_scale.gradient2("Silhueta")
-  ggsave(paste(output.dir, "manip-silh-", suffix, ".pdf", sep=""), p.silh, width=5, height=5)
-
-  p.precision <- ggplot(Y.m) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = precision)) +
-      shape_scale + color_scale.gradient2("Precisão")
-  ggsave(paste(output.dir, "manip-precision-", suffix, ".pdf", sep=""), p.precision, width=5, height=5)
-
-  p.recall <- ggplot(Y.m) +
-      theme_bw() +
-      labs(x = "", y = "") +
-      geom_point(aes(x = V1, y = V2, shape = classes, colour = recall)) +
-      shape_scale + color_scale.gradient2("Revocação")
-  ggsave(paste(output.dir, "manip-recall-", suffix, ".pdf", sep=""), p.recall, width=5, height=5)
-
-  pdf(paste(output.dir, "original-manip-", suffix, ".pdf", sep=""), width = 10, height = 8)
-  grid.arrange(p.s, p, pm.s, pm, ncol = 2)
-  dev.off()
-
-  pdf(paste(output.dir, "manip-measures-", suffix, ".pdf", sep=""), width = 10, height = 8)
-  grid.arrange(p.np, p.silh, p.precision, p.recall, ncol = 2)
-  dev.off()
-  
-  pdf(paste(output.dir, "manip-all-", suffix, ".pdf", sep=""), width = 12, height = 16)
-  grid.arrange(pm.s, pm, p.np, p.silh, p.precision, p.recall, ncol = 2)
-  dev.off()
 }
 
-#test(file = "datasets/iris.tbl", suffix = "iris", "tests/")
-test(file = "datasets/wdbc.tbl", suffix = "wdbc", "tests/")
-test(file = "datasets/segmentation.tbl", suffix = "segmentation", "tests/")
-test(file = "datasets/glass.tbl", suffix = "glass", "tests/")
+run.technique <- function(X, Dx, labels, k, ds, n.iter, output.dir) {
+  loginfo("Technique: %s", tech$name)
+  dir.create.safe(file.path(output.dir, ds$name, tech$name))
+
+  silhouette.Y <- c()
+  np.Y         <- c()
+  stress.Y     <- c()
+  precision.Y  <- c()
+  recall.Y     <- c()
+
+  silhouette.Ym <- c()
+  np.Ym         <- c()
+  stress.Ym     <- c()
+  precision.Ym  <- c()
+  recall.Ym     <- c()
+
+  for (iter in 1:n.iter) {
+    loginfo("Iteration: %02d", iter)
+
+    # Load sample indices...
+    fname <- paste("sample-indices-", iter, ".tbl", sep="")
+    sample.indices <- read.table(file.path(output.dir, ds$name, fname))$V1
+    # ... and initial projection
+    fname <- paste("Ys-", iter, ".tbl", sep="")
+    Ys <- read.table(file.path(output.dir, ds$name, fname))
+
+    loginfo("Calculating Y")
+    Y     <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys), tech$args))
+    fname <- paste("Y-", iter, ".tbl", sep="")
+    write.table(Y, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+
+    # Calculate distances (Y) and normalize
+    loginfo("Calculating distances")
+    Dy <- dist(Y)
+    Dy <- Dy / mean(Dy)
+    Dy <- as.matrix(Dy)
+
+    # Calculate measures
+    loginfo("Calculating measures")
+    np.Y         <- c(np.Y,         mean(NP(Dx, Dy, k)))
+    silhouette.Y <- c(silhouette.Y, mean(silhouette(Dy, classes)))
+    stress.Y     <- c(stress.Y,     stress(Dx, Dy))
+    precision.Y  <- c(precision.Y,  smoothed.pr(Dx, Dy, k)$s.precision)
+    recall.Y     <- c(recall.Y,     smoothed.pr(Dx, Dy, k)$s.recall)
+
+    # Testing manipulations
+    loginfo("Projection using Ysm.silhouette")
+    fname <- paste("Ysm-silhouette-", iter, ".tbl", sep="")
+    Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+    Y.m  <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+    fname <- paste("Ym-silhouette-", iter, ".tbl", sep="")
+    write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+
+    Dy <- dist(Y.m)
+    Dy <- Dy / mean(Dy)
+    Dy <- as.matrix(Dy)
+    silhouette.Ym <- c(silhouette.Ym, mean(silhouette(Dy, classes)))
+
+
+    loginfo("Projection using Ysm.np")
+    fname <- paste("Ysm-np-", iter, ".tbl", sep="")
+    Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+    Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+    fname <- paste("Ym-np-", iter, ".tbl", sep="")
+    write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+
+    Dy <- dist(Y.m)
+    Dy <- Dy / mean(Dy)
+    Dy <- as.matrix(Dy)
+    np.Ym <- c(np.Ym, mean(NP(Dx, Dy, k)))
+
+
+    loginfo("Projection using Ysm.stress")
+    fname <- paste("Ysm-stress-", iter, ".tbl", sep="")
+    Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+    Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+    fname <- paste("Ym-stress-", iter, ".tbl", sep="")
+    write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+
+    Dy <- dist(Y.m)
+    Dy <- Dy / mean(Dy)
+    Dy <- as.matrix(Dy)
+    stress.Ym <- c(stress.Ym, stress(Dx, Dy))
+
+
+    loginfo("Projection using Ysm.precision")
+    fname <- paste("Ysm-precision-", iter, ".tbl", sep="")
+    Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+    Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+    fname <- paste("Ym-precision-", iter, ".tbl", sep="")
+    write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+
+    Dy <- dist(Y.m)
+    Dy <- Dy / mean(Dy)
+    Dy <- as.matrix(Dy)
+    precision.Ym <- c(precision.Ym, smoothed.pr(Dx, Dy, k)$s.precision)
+
+
+    loginfo("Projection using Ysm.recall")
+    fname <- paste("Ysm-recall-", iter, ".tbl", sep="")
+    Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+    Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+    fname <- paste("Ym-recall-", iter, ".tbl", sep="")
+    write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+
+    Dy <- dist(Y.m)
+    Dy <- Dy / mean(Dy)
+    Dy <- as.matrix(Dy)
+    recall.Ym <- c(recall.Ym, smoothed.pr(Dx, Dy, k)$s.recall)
+  }
+
+  write.table(silhouette.Y, file.path(output.dir, ds$name, tech$name, "silhouette-Y.tbl"), col.names=F, row.names=F)
+  write.table(np.Y,         file.path(output.dir, ds$name, tech$name, "np-Y.tbl"),         col.names=F, row.names=F)
+  write.table(stress.Y,     file.path(output.dir, ds$name, tech$name, "stress-Y.tbl"),     col.names=F, row.names=F)
+  write.table(precision.Y,  file.path(output.dir, ds$name, tech$name, "precision-Y.tbl"),  col.names=F, row.names=F)
+  write.table(recall.Y,     file.path(output.dir, ds$name, tech$name, "recall-Y.tbl"),     col.names=F, row.names=F)
+
+  write.table(silhouette.Ym, file.path(output.dir, ds$name, tech$name, "silhouette-Ym.tbl"), col.names=F, row.names=F)
+  write.table(np.Ym,         file.path(output.dir, ds$name, tech$name, "np-Ym.tbl"),         col.names=F, row.names=F)
+  write.table(stress.Ym,     file.path(output.dir, ds$name, tech$name, "stress-Ym.tbl"),     col.names=F, row.names=F)
+  write.table(precision.Ym,  file.path(output.dir, ds$name, tech$name, "precision-Ym.tbl"),  col.names=F, row.names=F)
+  write.table(recall.Ym,     file.path(output.dir, ds$name, tech$name, "recall-Ym.tbl"),     col.names=F, row.names=F)
+}
+
+run <- function(datasets,
+                techniques,
+                output.dir,
+                kf=function(n) as.integer(min(sqrt(n), 0.05*n)),
+                n.iter=30,
+                intial.manipulation=T) {
+  dir.create.safe(output.dir)
+
+  for (ds in datasets) {
+    loginfo("Testing dataset: %s", ds$name)
+    dir.create.safe(file.path(output.dir, ds$name))
+
+    # Load and clean data by removing duplicates, center and scale
+    X <- read.table(ds$data.file)
+    if (!is.null(ds$labels.file)) {
+      labels <- read.table(ds$labels.file)$V1
+      labels <- labels[!duplicated(X)]
+      classes <- as.factor(labels)
+    }
+
+    X <- unique(X)
+    if (ds$scale) {
+      X <- scale(X)
+    }
+
+    n <- nrow(X)
+    k <- kf(n)
+
+    # Calculate distances (X) and normalize
+    loginfo("Calculating dist(X)")
+    Dx <- dist(X)
+    Dx <- Dx / mean(Dx)
+    Dx <- as.matrix(Dx)
+
+    # Generate samples, initial projections and all manipulations
+    if (intial.manipulation) {
+      run.manipulation(X, Dx, labels, k, ds, n.iter, output.dir)
+    }
+
+    # Test techniques
+    for (tech in techniques) {
+      run.technique(X, Dx, labels, k, ds, tech, n.iter, output.dir)
+    }
+  }
+}
+
+
+# Experiment configuration
+# Defines: datasets, techniques, output.dir
+source("config.R")
+
+args <- commandArgs(T)
+
+# Logging setup
+basicConfig()
+addHandler(writeToFile,
+           file=args[1],
+           level="FINEST")
+
+# The alpha and omega
+run(datasets, techniques, output.dir=output.dir, initial.manipulation=F)
