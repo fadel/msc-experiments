@@ -8,6 +8,7 @@ require(mp)
 require(Rtsne)
 
 source("measures.R")
+source("util.R")
 
 # Performs automated silhouette improvement manipulation, using a method
 # inspired by Schaefer et al. (2013).
@@ -74,18 +75,6 @@ scale.Ys <- function(Ys) {
   }
 
   Ys
-}
-
-# Creates a directory at given path, optionally logging the action.
-# If it already exists, the directory is not created.
-dir.create.safe <- function(path, log=T) {
-  if (!dir.exists(path)) {
-    if (log) {
-      loginfo("Creating directory: %s", path)
-    }
-
-    dir.create(path)
-  }
 }
 
 # Generates samples (one sample per iteration) and performs automated
