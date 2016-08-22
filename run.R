@@ -1,5 +1,6 @@
-# Main experiments script: performs sampling, manipulation and projections for
-# all techniques, datasets and measures.
+# run.R
+#
+# Main experiments script.
 
 require(logging)
 require(MASS)
@@ -75,6 +76,8 @@ scale.Ys <- function(Ys) {
   Ys
 }
 
+# Creates a directory at given path, optionally logging the action.
+# If it already exists, the directory is not created.
 dir.create.safe <- function(path, log=T) {
   if (!dir.exists(path)) {
     if (log) {
@@ -85,6 +88,8 @@ dir.create.safe <- function(path, log=T) {
   }
 }
 
+# Generates samples (one sample per iteration) and performs automated
+# manipulation for all measures on each sample.
 run.manipulation <- function(X, Dx, labels, k, ds, n.iter, output.dir) {
   n <- nrow(X)
 
@@ -178,8 +183,8 @@ run.technique <- function(X, Dx, labels, k, ds, n.iter, output.dir) {
 
     # Calculate measures
     loginfo("Calculating measures")
-    np.Y         <- c(np.Y,         mean(NP(Dx, Dy, k)))
     silhouette.Y <- c(silhouette.Y, mean(silhouette(Dy, classes)))
+    np.Y         <- c(np.Y,         mean(NP(Dx, Dy, k)))
     stress.Y     <- c(stress.Y,     stress(Dx, Dy))
     precision.Y  <- c(precision.Y,  smoothed.pr(Dx, Dy, k)$s.precision)
     recall.Y     <- c(recall.Y,     smoothed.pr(Dx, Dy, k)$s.recall)
@@ -266,9 +271,9 @@ run.technique <- function(X, Dx, labels, k, ds, n.iter, output.dir) {
 run <- function(datasets,
                 techniques,
                 output.dir,
-                kf=function(n) as.integer(min(sqrt(n), 0.05*n)),
                 n.iter=30,
-                intial.manipulation=T) {
+                intial.manipulation=T,
+                kf=function(n) as.integer(min(sqrt(n), 0.05*n))) {
   dir.create.safe(output.dir)
 
   for (ds in datasets) {
@@ -309,6 +314,239 @@ run <- function(datasets,
   }
 }
 
+# Runs all techniques (and only the techniques) to generate all mappings from
+# the original and manipulated samples.
+run.Y <- function(datasets,
+                  techniques,
+                  output.dir,
+                  n.iter=30,
+                  kf=function(n) as.integer(min(sqrt(n), 0.05*n))) {
+  for (ds in datasets) {
+    loginfo("Testing dataset: %s", ds$name)
+
+    # Load and clean data by removing duplicates, center and scale
+    X <- read.table(ds$data.file)
+    X <- unique(X)
+    if (ds$scale) {
+      X <- scale(X)
+    }
+
+    k <- kf(n)
+
+    # Test techniques
+    for (iter in 1:n.iter) {
+      loginfo("Iteration: %d", iter)
+
+      fname <- paste("sample-indices-", iter, ".tbl", sep="")
+      sample.indices <- read.table(file.path(output.dir, ds$name, fname))$V1
+
+      if (!is.null(ds$labels.file)) {
+        fname <- paste("Ysm-silhouette-", iter, ".tbl", sep="")
+        Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+        for (tech in techniques) {
+          loginfo("Projection using Ysm.silhouette")
+          Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+          fname <- paste("Ym-silhouette-", iter, ".tbl", sep="")
+          write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+        }
+      }
+
+      fname <- paste("Ysm-np-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      for (tech in techniques) {
+        loginfo("Projection using Ysm.np")
+        Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+        fname <- paste("Ym-np-", iter, ".tbl", sep="")
+        write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+      }
+
+      fname <- paste("Ysm-stress-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      for (tech in techniques) {
+        loginfo("Projection using Ysm.stress")
+        Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+        fname <- paste("Ym-stress-", iter, ".tbl", sep="")
+        write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+      }
+
+      fname <- paste("Ysm-precision-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      for (tech in techniques) {
+        loginfo("Projection using Ysm.precision")
+        Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+        fname <- paste("Ym-precision-", iter, ".tbl", sep="")
+        write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+      }
+
+      fname <- paste("Ysm-recall-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      for (tech in techniques) {
+        loginfo("Projection using Ysm.recall")
+        Y.m <- do.call(tech$fn, append(list(X=X, sample.indices=sample.indices, Ys=Ys.m), tech$args))
+        fname <- paste("Ym-recall-", iter, ".tbl", sep="")
+        write.table(Y.m, file.path(output.dir, ds$name, tech$name, fname), row.names=F, col.names=F)
+      }
+    }
+  }
+}
+
+relative.improvements <- function(datasets,
+                                  techniques,
+                                  output.dir,
+                                  n.iter=30,
+                                  kf=function(n) as.integer(min(sqrt(n), 0.05*n))) {
+  for (ds in datasets) {
+    loginfo("Dataset: %s", ds$name)
+
+    X <- read.table(ds$data.file)
+    if (!is.null(ds$labels.file)) {
+      labels <- read.table(ds$labels.file)$V1
+      labels <- labels[!duplicated(X)]
+      classes <- as.factor(labels)
+    }
+
+    X <- unique(X)
+    if (ds$scale) {
+      X <- scale(X)
+    }
+
+    n <- nrow(X)
+    k <- kf(n)
+
+    loginfo("Calculating dist(X)")
+    Dx <- dist(X)
+    Dx <- Dx / mean(Dx)
+    Dx <- as.matrix(Dx)
+
+    # Relative improvements per measure (for all iterations)
+    rcp.silhouette <- c()
+    rcp.np         <- c()
+    rcp.stress     <- c()
+    rcp.precision  <- c()
+    rcp.recall     <- c()
+
+    for (iter in 1:n.iter) {
+      loginfo("Iteration: %d", iter)
+
+      fname <- paste("sample-indices-", iter, ".tbl", sep="")
+      sample.indices <- read.table(file.path(output.dir, ds$name, fname))$V1
+      Dx.s <- Dx[sample.indices, sample.indices]
+      fname <- paste("Ys-", iter, ".tbl", sep="")
+      Ys <- read.table(file.path(output.dir, ds$name, fname))
+
+      loginfo("Calculating dist(Ys)")
+      Dy <- dist(Ys)
+      Dy <- Dy / mean(Dy)
+      Dy <- as.matrix(Dy)
+
+      loginfo("Calculating measures for Ys")
+      if (!is.null(ds$labels.file)) {
+        silhouette.Ys <- mean(silhouette(Dy, classes[sample.indices]))
+      }
+      np.Ys         <- mean(NP(Dx.s, Dy, k))
+      stress.Ys     <- stress(Dx.s, Dy)
+      s.pr <- smoothed.pr(Dx.s, Dy, k)
+      precision.Ys  <- s.pr$s.precision
+      recall.Ys     <- s.pr$s.recall
+
+      if (!is.null(ds$labels.file)) {
+        fname <- paste("Ysm-silhouette-", iter, ".tbl", sep="")
+        Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+        Dy <- dist(Ys.m)
+        Dy <- Dy / mean(Dy)
+        Dy <- as.matrix(Dy)
+        silhouette.Ysm <- mean(silhouette(Dy, classes[sample.indices]))
+        rcp.silhouette <- c(rcp.silhouette, silhouette.Ysm / silhouette.Ys)
+      }
+
+      fname <- paste("Ysm-np-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      Dy <- dist(Ys.m)
+      Dy <- Dy / mean(Dy)
+      Dy <- as.matrix(Dy)
+      np.Ysm <- mean(NP(Dx.s, Dy, k))
+      rcp.np <- c(rcp.np, np.Ysm / np.Ys)
+
+      fname <- paste("Ysm-stress-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      Dy <- dist(Ys.m)
+      Dy <- Dy / mean(Dy)
+      Dy <- as.matrix(Dy)
+      stress.Ysm <- stress(Dx.s, Dy)
+      rcp.stress <- c(rcp.stress, stress.Ysm / stress.Ys)
+
+      fname <- paste("Ysm-precision-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      Dy <- dist(Ys.m)
+      Dy <- Dy / mean(Dy)
+      Dy <- as.matrix(Dy)
+      precision.Ysm <- smoothed.pr(Dx.s, Dy, k)$s.precision
+      rcp.precision <- c(rcp.precision, precision.Ysm / precision.Ys)
+
+      fname <- paste("Ysm-recall-", iter, ".tbl", sep="")
+      Ys.m <- read.table(file.path(output.dir, ds$name, fname))
+      Dy <- dist(Ys.m)
+      Dy <- Dy / mean(Dy)
+      Dy <- as.matrix(Dy)
+      recall.Ysm <- smoothed.pr(Dx.s, Dy, k)$s.recall
+      rcp.recall <- c(rcp.recall, precision.Ysm / precision.Ys)
+    }
+
+    write.table(rcp.silhouette, file.path(output.dir, ds$name, "r-cp-silhouette.tbl"), col.names=F, row.names=F)
+    write.table(rcp.np,         file.path(output.dir, ds$name, "r-cp-np.tbl"),         col.names=F, row.names=F)
+    write.table(rcp.stress,     file.path(output.dir, ds$name, "r-cp-stress.tbl"),     col.names=F, row.names=F)
+    write.table(rcp.precision,  file.path(output.dir, ds$name, "r-cp-precision.tbl"),  col.names=F, row.names=F)
+    write.table(rcp.recall,     file.path(output.dir, ds$name, "r-cp-recall.tbl"),     col.names=F, row.names=F)
+
+
+    for (tech in techniques) {
+      loginfo("Technique: %s", tech$name)
+
+      r.silhouette <- c()
+      r.np         <- c()
+      r.stress     <- c()
+      r.precision  <- c()
+      r.recall     <- c()
+
+      if (!is.null(ds$labels.file)) {
+        silhouette.Y <- read.table(file.path(output.dir, ds$name, tech$name, "silhouette-Y.tbl"))$V1
+      }
+      np.Y         <- read.table(file.path(output.dir, ds$name, tech$name, "np-Y.tbl"))$V1
+      stress.Y     <- read.table(file.path(output.dir, ds$name, tech$name, "stress-Y.tbl"))$V1
+      precision.Y  <- read.table(file.path(output.dir, ds$name, tech$name, "precision-Y.tbl"))$V1
+      recall.Y     <- read.table(file.path(output.dir, ds$name, tech$name, "recall-Y.tbl"))$V1
+
+      if (!is.null(ds$labels.file)) {
+        silhouette.Ym <- read.table(file.path(output.dir, ds$name, tech$name, "silhouette-Ym.tbl"))$V1
+      }
+      np.Ym         <- read.table(file.path(output.dir, ds$name, tech$name, "np-Ym.tbl"))$V1
+      stress.Ym     <- read.table(file.path(output.dir, ds$name, tech$name, "stress-Ym.tbl"))$V1
+      precision.Ym  <- read.table(file.path(output.dir, ds$name, tech$name, "precision-Ym.tbl"))$V1
+      recall.Ym     <- read.table(file.path(output.dir, ds$name, tech$name, "recall-Ym.tbl"))$V1
+
+      for (iter in 1:n.iter) {
+        loginfo("Iteration: %d", iter)
+
+        if (!is.null(ds$labels.file)) {
+          r.silhouette <- c(r.silhouette, silhouette.Ym[iter] / silhouette.Y[iter])
+        }
+        r.np         <- c(r.np,        np.Ym[iter] / np.Y[iter])
+        r.stress     <- c(r.stress,    stress.Ym[iter] / stress.Y[iter])
+        r.precision  <- c(r.precision, precision.Ym[iter] / precision.Y[iter])
+        r.recall     <- c(r.recall,    recall.Ym[iter] / recall.Y[iter])
+      }
+
+      if (!is.null(ds$labels.file)) {
+        write.table(r.silhouette, file.path(output.dir, ds$name, tech$name, "r-silhouette.tbl"), col.names=F, row.names=F)
+      }
+      write.table(r.np,         file.path(output.dir, ds$name, tech$name, "r-np.tbl"),         col.names=F, row.names=F)
+      write.table(r.stress,     file.path(output.dir, ds$name, tech$name, "r-stress.tbl"),     col.names=F, row.names=F)
+      write.table(r.precision,  file.path(output.dir, ds$name, tech$name, "r-precision.tbl"),  col.names=F, row.names=F)
+      write.table(r.recall,     file.path(output.dir, ds$name, tech$name, "r-recall.tbl"),     col.names=F, row.names=F)
+    }
+  }
+}
+
 
 # Experiment configuration
 # Defines: datasets, techniques, output.dir
@@ -324,3 +562,6 @@ addHandler(writeToFile,
 
 # The alpha and omega
 run(datasets, techniques, output.dir=output.dir, initial.manipulation=F)
+
+# Compute relative improvements for all datasets and techniques (and samples)
+relative.improvements(datasets, techniques, output.dir)
