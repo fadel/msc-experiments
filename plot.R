@@ -4,6 +4,8 @@
 require(cowplot)
 require(gridExtra)
 require(logging)
+require(reshape2)
+require(scales)
 
 source("util.R")
 
@@ -167,16 +169,26 @@ plot.scatter.measure <- function(measure, datasets, techniques, output.dir, n.it
 
   min.max <- min(max(measure.df$x), max(measure.df$y))
   p <- ggplot(measure.df) +
-          background_grid(major="xy", minor="none") +
-          theme(legend.position="right") +
-          labs(x=paste(measure$name.pretty, "(before)", sep=" "),
-               y=paste(measure$name.pretty, "(after)", sep=" ")) +
-          geom_point(aes(x=x, y=y, color=tech, shape=dataset), alpha=0.8, size=3) +
-          scale_color_brewer(palette="Set1", guide=guide_legend(title="Technique")) +
-          scale_shape(guide=guide_legend(title="Dataset")) +
-          geom_abline(intercept=0, slope=1)
+         background_grid(major="xy", minor="none") +
+         theme(legend.position="right") +
+         labs(x=paste(measure$name.pretty, "(before)", sep=" "),
+              y=paste(measure$name.pretty, "(after)", sep=" ")) +
+         geom_point(aes(x=x, y=y, color=tech, shape=dataset), alpha=0.8, size=3) +
+         scale_color_brewer(palette="Set1", guide=guide_legend(title="Technique")) +
+         scale_shape(guide=guide_legend(title="Dataset")) +
+         geom_abline(intercept=0, slope=1)
 
   fname <- file.path(output.dir, "plots", paste(measure$name, "-scatter", ".pdf", sep=""))
+  loginfo("Saving plot: %s", fname)
+  save_plot(fname, p, base_aspect_ratio=1.5)
+
+  p <- p +
+    scale_x_log10(breaks=trans_breaks("log10", function(x) 10^x),
+                  labels=trans_format("log10", math_format(10^ .x))) +
+    scale_y_log10(breaks=trans_breaks("log10", function(x) 10^x),
+                  labels=trans_format("log10", math_format(10^ .x))) +
+    annotation_logticks()
+  fname <- file.path(output.dir, "plots", paste(measure$name, "-scatter-log", ".pdf", sep=""))
   loginfo("Saving plot: %s", fname)
   save_plot(fname, p, base_aspect_ratio=1.5)
 
@@ -192,13 +204,68 @@ plot.scatter <- function(datasets, techniques, measures, output.dir, n.iter=30) 
   }
 }
 
+# Plot a single barplot of techniques and datasets, where the y axis shows the
+# difference Ym-Y, with confidence intervals.
+plot.ci.measure <- function(measure, datasets, techniques, output.dir, n.iter=30) {
+  measure.df <- data.frame()
+  for (tech in techniques) {
+    for (ds in datasets) {
+      if (is.null(ds$labels.file) && measure$name == "silhouette") {
+        next
+      }
+
+      base.path <- file.path(output.dir, ds$name, tech$name)
+      fname <- file.path(base.path, paste(measure$name, "Y.tbl", sep="-"))
+      Y.measure  <- read.table(fname)$V1
+      fname <- file.path(base.path, paste(measure$name, "Ym.tbl", sep="-"))
+      Ym.measure <- read.table(fname)$V1
+      measure.df <- rbind(measure.df, data.frame(tech=tech$name.pretty,
+                                                 dataset=ds$name.pretty,
+                                                 y=Ym.measure - Y.measure))
+    }
+  }
+
+  p <- ggplot(measure.df) +
+         background_grid(major="xy", minor="none") +
+         theme(legend.position="right") +
+         labs(x="", y=measure$name.pretty) +
+         stat_summary(aes(x=tech, y=y, color=tech, shape=dataset), fun.data=ci.fun, position=position_dodge(width=0.75)) +
+         scale_color_brewer(palette="Set1", guide=guide_legend(title="Technique")) +
+         scale_shape(guide=guide_legend(title="Dataset")) +
+         scale_x_discrete(expand=c(0, 0.01))
+
+  fname <- file.path(output.dir, "plots", paste(measure$name, "-ci", ".pdf", sep=""))
+  loginfo("Saving plot: %s", fname)
+  save_plot(fname, p, base_aspect_ratio=1.65)
+
+  p <- p + scale_y_log10(breaks=trans_breaks("log10", function(x) 10^x),
+                         labels=trans_format("log10", math_format(10^ .x))) +
+    annotation_logticks(sides="l")
+
+  fname <- file.path(output.dir, "plots", paste(measure$name, "-ci-log", ".pdf", sep=""))
+  loginfo("Saving plot: %s", fname)
+  save_plot(fname, p, base_aspect_ratio=1.65)
+
+
+  p
+}
+
+# This function runs the function above for all measures
+plot.ci <- function(datasets, techniques, measures, output.dir, n.iter=30) {
+  dir.create.safe(file.path(output.dir, "plots"))
+
+  for (measure in measures) {
+    p <- plot.ci.measure(measure, datasets, techniques, output.dir, n.iter)
+  }
+}
+
 # Experiment configuration
 # Defines: datasets, techniques, measures, output.dir
 source("config.R")
 
 args <- commandArgs(T)
 
-# Logging setup
+# logging setup
 basicConfig()
 addHandler(writeToFile,
            file=args[1],
@@ -208,3 +275,4 @@ plot.measures(datasets, techniques, measures, output.dir)
 plot.averages(datasets, techniques, measures, output.dir)
 plot.scatter(datasets, techniques, measures, output.dir)
 plot.ri(datasets, techniques, measures, output.dir)
+plot.ci(datasets, techniques, measures, output.dir)
