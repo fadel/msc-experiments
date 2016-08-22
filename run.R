@@ -536,6 +536,33 @@ relative.improvements <- function(datasets,
   }
 }
 
+# Computes confidence intervals for the difference in measures between
+# manipulated and original samples.
+confidence.intervals <- function(datasets, techniques, measures, output.dir, n.iter=30) {
+  for (measure in measures) {
+    measure.summary <- data.frame()
+    for (tech in techniques) {
+      for (ds in datasets) {
+        if (is.null(ds$labels.file) && measure$name == "silhouette") {
+          next
+        }
+
+        base.path <- file.path(output.dir, ds$name, tech$name)
+        fname <- file.path(base.path, paste(measure$name, "Y.tbl", sep="-"))
+        Y.measure  <- read.table(fname)$V1
+        fname <- file.path(base.path, paste(measure$name, "Ym.tbl", sep="-"))
+        Ym.measure <- read.table(fname)$V1
+        measure.summary <- rbind(measure.summary, data.frame(tech=tech$name.pretty,
+                                                            dataset=ds$name.pretty,
+                                                            ci.fun(Ym.measure - Y.measure)))
+      }
+    }
+
+    fname <- paste(measure$name, "-ci.tbl", sep="")
+    write.table(measure.summary, file.path(output.dir, fname), col.names=T, row.names=F)
+  }
+}
+
 
 # Experiment configuration
 # Defines: datasets, techniques, output.dir
@@ -554,3 +581,6 @@ run(datasets, techniques, output.dir=output.dir, initial.manipulation=F)
 
 # Compute relative improvements for all datasets and techniques (and samples)
 relative.improvements(datasets, techniques, output.dir)
+
+# Compute all confidence intervals
+confidence.intervals(datasets, techniques, measures, output.dir)
