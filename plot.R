@@ -5,8 +5,10 @@ require(cowplot)
 require(gridExtra)
 require(logging)
 
+source("util.R")
+
 # Plots results for experiments of all techniques for a given measure and
-# datasset.
+# dataset.
 plot.measure <- function(ds, techniques, output.dir, measure, n.iter=30) {
   measure.df <- data.frame()
   scale.labels <- c()
@@ -50,6 +52,53 @@ plot.measures <- function(datasets, techniques, measures, output.dir, n.iter=30)
       }
 
       plot.measure(ds, techniques, output.dir, measure, n.iter)
+    }
+  }
+}
+
+# Plots relative improvements for all techniques for a given measure and
+# dataset.
+plot.ri.measure <- function(ds, techniques, output.dir, measure, n.iter=30) {
+  df <- data.frame()
+  scale.labels <- c()
+
+  #r.cp <- read.table(file.path(output.dir, ds$name, paste("r-cp-", measure$name, ".tbl", sep="")))$V1
+  for (tech in techniques) {
+    r    <- read.table(file.path(output.dir, ds$name, tech$name, paste("r-", measure$name, ".tbl", sep="")))$V1
+    df <- rbind(df, data.frame(name=tech$name.pretty,
+                               type=paste("Y", tech$name, ")", sep=""),
+                               V1=r)
+               )
+
+    scale.labels <- c(scale.labels, tech$name.pretty)
+  }
+
+  p <- ggplot(df) +
+         background_grid(major="xy", minor="none") +
+         theme(legend.position="none") +
+         labs(x="", y=measure$name.pretty) +
+         geom_boxplot(aes(type, V1, fill=name)) +
+         scale_fill_brewer(palette="Set1", guide=guide_legend(title="")) +
+         scale_y_continuous(limits=c(min(1, min(df$V1)), max(1, max(df$V1)))) +
+         scale_x_discrete(labels=scale.labels)
+
+  fname <- file.path(output.dir, "plots", ds$name, paste("r-", measure$name, ".pdf", sep=""))
+  loginfo("Saving plot: %s", fname)
+  save_plot(fname, p, base_aspect_ratio=2)
+}
+
+# Plot boxplots of all techniques measures per dataset.
+plot.ri <- function(datasets, techniques, measures, output.dir, n.iter=30) {
+  dir.create.safe(file.path(output.dir, "plots"))
+
+  for (ds in datasets) {
+    dir.create.safe(file.path(output.dir, "plots", ds$name))
+    for (measure in measures) {
+      if (is.null(ds$labels.file) && measure$name == "silhouette") {
+        next
+      }
+
+      plot.ri.measure(ds, techniques, output.dir, measure, n.iter)
     }
   }
 }
@@ -158,3 +207,4 @@ addHandler(writeToFile,
 plot.measures(datasets, techniques, measures, output.dir)
 plot.averages(datasets, techniques, measures, output.dir)
 plot.scatter(datasets, techniques, measures, output.dir)
+plot.ri(datasets, techniques, measures, output.dir)
