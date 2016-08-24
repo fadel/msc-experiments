@@ -1,11 +1,11 @@
 # Functions for plotting results from manipulation experiments.
 # NOTE: This script should only be used after results are generated with run.R
 
-require(cowplot)
-require(gridExtra)
-require(logging)
-require(reshape2)
-require(scales)
+library(cowplot)
+library(gridExtra)
+library(logging)
+library(reshape2)
+library(scales)
 
 source("util.R")
 

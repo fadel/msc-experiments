@@ -2,10 +2,10 @@
 #
 # Main experiments script.
 
-require(logging)
-require(MASS)
-require(mp)
-require(Rtsne)
+library(logging)
+library(MASS)
+library(mp)
+library(Rtsne)
 
 source("measures.R")
 source("util.R")
