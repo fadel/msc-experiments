@@ -228,8 +228,9 @@ plot.evo.measure <- function(measure, datasets, techniques, output.dir) {
       Y.measure  <- read.table(file.path(base.path, fname))$V1
       measure.df <- rbind(measure.df, data.frame(tech=tech$name.pretty,
                                                  dataset=ds$name.pretty,
-                                                 x=Ys.measure,
-                                                 y=Y.measure))
+                                                 key=paste(tech$name, ds$name, sep="-"),
+                                                 x=rev(Ys.measure),
+                                                 y=rev(Y.measure)))
     }
   }
 
@@ -238,10 +239,11 @@ plot.evo.measure <- function(measure, datasets, techniques, output.dir) {
          theme(legend.position="right") +
          labs(x=paste(measure$name.pretty, "(Ys)", sep=" "),
               y=paste(measure$name.pretty, "(Y)", sep=" ")) +
-         geom_point(aes(x=x, y=y, color=tech, shape=dataset), alpha=0.8, size=3) +
-         geom_path(aes(x=x, y=y, color=tech, group=tech), arrow=arrow(angle=10, length=unit(0.15, "in"), type="closed"))
+         geom_point(aes(x=x, y=y, color=tech, shape=dataset), alpha=0.8, size=1.5) +
+         geom_path(aes(x=x, y=y, color=tech, group=key)) +
          scale_color_brewer(palette="Set1", guide=guide_legend(title="Technique")) +
-         scale_shape(guide=guide_legend(title="Dataset"))
+         scale_shape(guide=guide_legend(title="Dataset")) +
+         geom_abline(intercept=0, slope=1)
 
   fname <- file.path(output.dir, "plots", paste(measure$name, "-evo", ".pdf", sep=""))
   loginfo("Saving plot: %s", fname)
@@ -272,7 +274,8 @@ addHandler(writeToFile,
            file=args[1],
            level="FINEST")
 
-plot.measures(datasets, techniques, measures, output.dir)
-plot.averages(datasets, techniques, measures, output.dir)
-plot.scatter(datasets, techniques, measures, output.dir)
-plot.ci(datasets, techniques, measures, output.dir)
+#plot.measures(datasets, techniques, measures, output.dir)
+#plot.averages(datasets, techniques, measures, output.dir)
+#plot.scatter(datasets, techniques, measures, output.dir)
+#plot.ci(datasets, techniques, measures, output.dir)
+plot.evo(datasets, techniques, measures, output.dir)
