@@ -276,6 +276,6 @@ addHandler(writeToFile,
 
 #plot.measures(datasets, techniques, measures, output.dir)
 #plot.averages(datasets, techniques, measures, output.dir)
-#plot.scatter(datasets, techniques, measures, output.dir)
-#plot.ci(datasets, techniques, measures, output.dir)
+plot.scatter(datasets, techniques, measures, output.dir)
+plot.ci(datasets, techniques, measures, output.dir)
 plot.evo(datasets, techniques, measures, output.dir)
