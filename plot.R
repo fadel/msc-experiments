@@ -237,7 +237,7 @@ plot.evo.measure <- function(measure, datasets, techniques, output.dir) {
   p <- ggplot(measure.df) +
          background_grid(major="xy", minor="none") +
          theme(legend.position="right") +
-         labs(x=paste(measure$name.pretty, "(Ys)", sep=" "),
+         labs(x=paste(measure$name.pretty, "(Y')", sep=" "),
               y=paste(measure$name.pretty, "(Y)", sep=" ")) +
          geom_point(aes(x=x, y=y, color=tech, shape=dataset), alpha=0.8, size=1.5) +
          geom_path(aes(x=x, y=y, color=tech, group=key)) +
