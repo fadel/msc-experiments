@@ -352,11 +352,13 @@ run.manipulation.evo <- function(X, Dx, labels, sample.indices, k, ds, output.di
   # Perform manipulation
   loginfo("Running manipulation procedures")
 
-  loginfo("Ys.f: Silhouette")
-  Dx.m <- automated.silh(X[sample.indices, ], labels[sample.indices])
-  Ys.silhouette <- scale.Ys(cmdscale(Dx.m))
-  Ys.m <- Ys.silhouette
-  write.table(Ys.m, file.path(output.dir, ds$name, "Ysf-silhouette.tbl"), row.names=F, col.names=F)
+  if (!is.null(ds$labels.file)) {
+    loginfo("Ys.f: Silhouette")
+    Dx.m <- automated.silh(X[sample.indices, ], labels[sample.indices])
+    Ys.silhouette <- scale.Ys(cmdscale(Dx.m))
+    Ys.m <- Ys.silhouette
+    write.table(Ys.m, file.path(output.dir, ds$name, "Ysf-silhouette.tbl"), row.names=F, col.names=F)
+  }
 
   loginfo("Ys.f: NP")
   Ys.np <- scale.Ys(Rtsne(X[sample.indices, ], perplexity=k)$Y)
@@ -384,7 +386,9 @@ run.technique.evo <- function(X, Dx, labels, k, ds, tech, n.samples, output.dir)
   loginfo("Technique: %s", tech$name)
   dir.create.safe(file.path(output.dir, ds$name, tech$name))
 
-  classes <- as.factor(labels)
+  if (!is.null(ds$labels.file)) {
+    classes <- as.factor(labels)
+  }
 
   # Load sample indices...
   sample.indices <- read.table(file.path(output.dir, ds$name, "sample-indices.tbl"))$V1
@@ -608,7 +612,7 @@ run.evo <- function(datasets,
     Dx <- as.matrix(Dx)
 
     loginfo("Extracting control points")
-    sample.indices <- extract.CPs(Dx)
+    sample.indices <- extract.CPs(Dx, k=max(sqrt(n)*3, ncol(X)))
     write.table(sample.indices, file.path(output.dir, ds$name, "sample-indices.tbl"), row.names=F, col.names=F)
 
     # Computes each manipulation target
@@ -738,9 +742,10 @@ addHandler(writeToFile,
            file=args[1],
            level="FINEST")
 
-# The alpha and omega
+# CP positioning improvement
 run(datasets, techniques, output.dir=output.dir, initial.manipulation=F)
-run.evo(datasets, techniques, output.dir=output.dir)
-
 # Compute all confidence intervals
 confidence.intervals(datasets, techniques, measures, output.dir)
+
+# CP improvement evolution experiment
+run.evo(datasets, techniques, output.dir=output.dir)
