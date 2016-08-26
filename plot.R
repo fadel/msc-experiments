@@ -58,53 +58,6 @@ plot.measures <- function(datasets, techniques, measures, output.dir, n.iter=30)
   }
 }
 
-# Plots relative improvements for all techniques for a given measure and
-# dataset.
-plot.ri.measure <- function(ds, techniques, output.dir, measure, n.iter=30) {
-  df <- data.frame()
-  scale.labels <- c()
-
-  #r.cp <- read.table(file.path(output.dir, ds$name, paste("r-cp-", measure$name, ".tbl", sep="")))$V1
-  for (tech in techniques) {
-    r    <- read.table(file.path(output.dir, ds$name, tech$name, paste("r-", measure$name, ".tbl", sep="")))$V1
-    df <- rbind(df, data.frame(name=tech$name.pretty,
-                               type=paste("Y", tech$name, ")", sep=""),
-                               V1=r)
-               )
-
-    scale.labels <- c(scale.labels, tech$name.pretty)
-  }
-
-  p <- ggplot(df) +
-         background_grid(major="xy", minor="none") +
-         theme(legend.position="none") +
-         labs(x="", y=measure$name.pretty) +
-         geom_boxplot(aes(type, V1, fill=name)) +
-         scale_fill_brewer(palette="Set1", guide=guide_legend(title="")) +
-         scale_y_continuous(limits=c(min(1, min(df$V1)), max(1, max(df$V1)))) +
-         scale_x_discrete(labels=scale.labels)
-
-  fname <- file.path(output.dir, "plots", ds$name, paste("r-", measure$name, ".pdf", sep=""))
-  loginfo("Saving plot: %s", fname)
-  save_plot(fname, p, base_aspect_ratio=2)
-}
-
-# Plot boxplots of all techniques measures per dataset.
-plot.ri <- function(datasets, techniques, measures, output.dir, n.iter=30) {
-  dir.create.safe(file.path(output.dir, "plots"))
-
-  for (ds in datasets) {
-    dir.create.safe(file.path(output.dir, "plots", ds$name))
-    for (measure in measures) {
-      if (is.null(ds$labels.file) && measure$name == "silhouette") {
-        next
-      }
-
-      plot.ri.measure(ds, techniques, output.dir, measure, n.iter)
-    }
-  }
-}
-
 # Same as above, but averages over all datasets.
 plot.averages <- function(datasets, techniques, measures, output.dir, n.iter=30) {
   dir.create.safe(file.path(output.dir, "plots"))
@@ -215,10 +168,10 @@ plot.ci.measure <- function(measure, datasets, techniques, output.dir, n.iter=30
       }
 
       base.path <- file.path(output.dir, ds$name, tech$name)
-      fname <- file.path(base.path, paste(measure$name, "Y.tbl", sep="-"))
-      Y.measure  <- read.table(fname)$V1
-      fname <- file.path(base.path, paste(measure$name, "Ym.tbl", sep="-"))
-      Ym.measure <- read.table(fname)$V1
+      fname <- paste(measure$name, "Y.tbl", sep="-")
+      Y.measure  <- read.table(file.path(base.path, fname))$V1
+      fname <- paste(measure$name, "Ym.tbl", sep="-")
+      Ym.measure <- read.table(file.path(base.path, fname))$V1
       measure.df <- rbind(measure.df, data.frame(tech=tech$name.pretty,
                                                  dataset=ds$name.pretty,
                                                  y=Ym.measure - Y.measure))
@@ -259,6 +212,54 @@ plot.ci <- function(datasets, techniques, measures, output.dir, n.iter=30) {
   }
 }
 
+# Plot a single scatterplot of techniques and datasets, where x axis is the
+# measure anipulation.
+plot.evo.measure <- function(measure, datasets, techniques, output.dir) {
+  measure.df <- data.frame()
+  for (ds in datasets) {
+    if (is.null(ds$labels.file) && measure$name == "silhouette") {
+      next
+    }
+    for (tech in techniques) {
+      base.path <- file.path(output.dir, ds$name, tech$name)
+      fname <- paste(measure$name, "Ys-evo.tbl", sep="-")
+      Ys.measure  <- read.table(file.path(base.path, fname))$V1
+      fname <- paste(measure$name, "Y-evo.tbl", sep="-")
+      Y.measure  <- read.table(file.path(base.path, fname))$V1
+      measure.df <- rbind(measure.df, data.frame(tech=tech$name.pretty,
+                                                 dataset=ds$name.pretty,
+                                                 x=Ys.measure,
+                                                 y=Y.measure))
+    }
+  }
+
+  p <- ggplot(measure.df) +
+         background_grid(major="xy", minor="none") +
+         theme(legend.position="right") +
+         labs(x=paste(measure$name.pretty, "(Ys)", sep=" "),
+              y=paste(measure$name.pretty, "(Y)", sep=" ")) +
+         geom_point(aes(x=x, y=y, color=tech, shape=dataset), alpha=0.8, size=3) +
+         geom_path(aes(x=x, y=y, color=tech, group=tech), arrow=arrow(angle=10, length=unit(0.15, "in"), type="closed"))
+         scale_color_brewer(palette="Set1", guide=guide_legend(title="Technique")) +
+         scale_shape(guide=guide_legend(title="Dataset"))
+
+  fname <- file.path(output.dir, "plots", paste(measure$name, "-evo", ".pdf", sep=""))
+  loginfo("Saving plot: %s", fname)
+  save_plot(fname, p, base_aspect_ratio=1.5)
+
+  p
+}
+
+# This function runs the scatterplot function above for all measures
+plot.evo <- function(datasets, techniques, measures, output.dir) {
+  dir.create.safe(file.path(output.dir, "plots"))
+
+  for (measure in measures) {
+    p <- plot.evo.measure(measure, datasets, techniques, output.dir)
+  }
+}
+
+
 # Experiment configuration
 # Defines: datasets, techniques, measures, output.dir
 source("config.R")
@@ -274,5 +275,4 @@ addHandler(writeToFile,
 plot.measures(datasets, techniques, measures, output.dir)
 plot.averages(datasets, techniques, measures, output.dir)
 plot.scatter(datasets, techniques, measures, output.dir)
-plot.ri(datasets, techniques, measures, output.dir)
 plot.ci(datasets, techniques, measures, output.dir)
