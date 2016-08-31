@@ -1,0 +1,5 @@
+The script was originally run as:
+    python mnist_extract.py 2000
+
+The generated samples are stored in the files `mnist_train_sample.tbl` and
+`mnist_test_sample.tbl`.
