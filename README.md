@@ -7,6 +7,9 @@ the `datasets` directory are used to download and prepare the datasets used.
 The main R script is `run.R`. It is configured via `config.R`, which contains
 details about which techniques and datasets we are running the experiments on.
 
+The script `plot.R` generates plots of the results from `run.R`. It also uses
+configuration from `config.R`.
+
 # Python scripts
 Most scripts should run with a simple `python script.py`. If it requires
 additional parameters, it will say so and explain which are those. Whenever that
